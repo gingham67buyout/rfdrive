@@ -166,6 +166,7 @@
 
     /* ── WIDE SETTINGS INPUT ── */
     .set-inp-wide { width: 100%; }
+    .set-row-vertical { flex-direction: column; align-items: stretch; gap: 5px; }
 
     /* ── CALCULATE BTN ── */
     .btn-calc {
@@ -611,7 +612,7 @@
     <!-- ── SECTION: CONFIGURAÇÕES ── -->
     <div class="section">
       <div class="sec-title">⚙️ Configurações</div>
-      <div class="set-row" style="flex-direction:column;align-items:stretch;gap:5px">
+      <div class="set-row set-row-vertical">
         <span class="set-lbl">API Key Google</span>
         <input type="text" class="set-inp set-inp-wide" id="cfg-apikey" placeholder="Cole sua chave da API aqui">
       </div>
@@ -846,9 +847,9 @@ async function initApp() {
   // --- API Key ---
   let apiKey = cfg.apiKey || '';
   if (!apiKey) {
-    apiKey = (prompt('Insira sua chave da API do Google Maps:') || '').trim();
+    apiKey = (prompt('Insira sua chave da API do Google Maps.\nVocê também pode configurá-la em Configurações.') || '').trim();
     if (!apiKey) {
-      toast('⚠️ API Key é obrigatória para usar o mapa');
+      toast('⚠️ Informe a API Key em Configurações');
       return;
     }
     cfg.apiKey = apiKey;
