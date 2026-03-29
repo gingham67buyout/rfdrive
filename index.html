@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>RF DRIVE – Calculadora de Corridas</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root {
       --gold: #D4AF37;
@@ -144,30 +143,29 @@
     }
     .field-clear:hover { color: var(--gray-light); }
 
-    /* ── AUTOCOMPLETE ── */
-    .ac-list {
-      position: absolute;
-      top: calc(100% + 2px);
-      left: 0; right: 0;
+    /* ── GOOGLE PLACES AUTOCOMPLETE ── */
+    .pac-container {
       background: #1c1c1c;
       border: 1px solid #333;
       border-radius: 8px;
-      z-index: 9999;
-      max-height: 210px;
-      overflow-y: auto;
       box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      z-index: 10000;
     }
-    .ac-item {
+    .pac-item {
       padding: 9px 12px;
       cursor: pointer;
       font-size: 0.78rem;
-      color: var(--white);
+      color: #ffffff;
       border-bottom: 1px solid #262626;
-      transition: background 0.1s;
+      background: transparent;
     }
-    .ac-item:last-child { border-bottom: none; }
-    .ac-item:hover { background: rgba(212,175,55,0.1); }
-    .ac-item small { display: block; color: var(--gray); font-size: 0.68rem; margin-top: 1px; }
+    .pac-item:hover { background: rgba(212,175,55,0.1); }
+    .pac-item-query { color: #ffffff; }
+    .pac-icon { display: none; }
+    .pac-matched { font-weight: 700; color: #D4AF37; }
+
+    /* ── WIDE SETTINGS INPUT ── */
+    .set-inp-wide { width: 100%; }
 
     /* ── CALCULATE BTN ── */
     .btn-calc {
@@ -524,7 +522,6 @@
           <input type="text" id="inp-origin" placeholder="De onde vai sair?" autocomplete="off">
           <button class="field-clear" id="clr-origin" tabindex="-1">✕</button>
         </div>
-        <div class="ac-list" id="ac-origin"></div>
       </div>
 
       <div class="field" id="field-dest">
@@ -534,7 +531,6 @@
           <input type="text" id="inp-dest" placeholder="Para onde vai?" autocomplete="off">
           <button class="field-clear" id="clr-dest" tabindex="-1">✕</button>
         </div>
-        <div class="ac-list" id="ac-dest"></div>
       </div>
 
       <button class="btn-calc" id="btn-calc">
@@ -615,6 +611,10 @@
     <!-- ── SECTION: CONFIGURAÇÕES ── -->
     <div class="section">
       <div class="sec-title">⚙️ Configurações</div>
+      <div class="set-row" style="flex-direction:column;align-items:stretch;gap:5px">
+        <span class="set-lbl">API Key Google</span>
+        <input type="text" class="set-inp set-inp-wide" id="cfg-apikey" placeholder="Cole sua chave da API aqui">
+      </div>
       <div class="set-row">
         <span class="set-lbl">Valor por KM</span>
         <div style="display:flex;align-items:center;gap:4px">
@@ -650,16 +650,12 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- LEAFLET -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ═══════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════
 const CFG_KEY   = 'rfdrive_config';
 const HIST_KEY  = 'rfdrive_history';
-const AC_DEBOUNCE_MS   = 420;
-const AC_BLUR_DELAY_MS = 200;
 
 function loadCfg() {
   try { return Object.assign({ km: 2.10, min: 10.00 }, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); }
@@ -685,177 +681,146 @@ let fare   = null;   // number
 let adjFare = null;
 let customMode = false;
 
-// ═══════════════════════════════════════════════
-//  MAP
-// ═══════════════════════════════════════════════
-const map = L.map('map', {
-  center: [-8.2836, -35.0455],
-  zoom: 12
-});
+let map = null;
+let mOrigin = null, mDest = null, mRoute = null;
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
-  subdomains: 'abcd',
-  maxZoom: 20
-}).addTo(map);
+// ═══════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════
+let _toastT;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => el.classList.remove('show'), 3000);
+}
 
-function mkIcon(color) {
-  return L.divIcon({
-    html: `<div style="width:13px;height:13px;border-radius:50%;background:${color};border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.6)"></div>`,
-    iconSize: [13, 13], iconAnchor: [6, 6], className: ''
+// ═══════════════════════════════════════════════
+//  GOOGLE MAPS LOADER
+// ═══════════════════════════════════════════════
+function loadGoogleMaps(apiKey) {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.maps) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry&language=pt-BR&region=BR`;
+    s.async = true;
+    s.defer = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Falha ao carregar Google Maps'));
+    document.head.appendChild(s);
   });
 }
 
-let mOrigin = null, mDest = null, mRoute = null;
+// ═══════════════════════════════════════════════
+//  DARK THEME
+// ═══════════════════════════════════════════════
+const DARK_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#212121' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#212121' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#757575' }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#181818' }] },
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#2c2c2c' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#212121' }] },
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#3c3c3c' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f2f2f' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] }
+];
+
+// ═══════════════════════════════════════════════
+//  MAP HELPERS
+// ═══════════════════════════════════════════════
+function createMarker(lat, lon, color) {
+  return new google.maps.Marker({
+    position: { lat, lng: lon },
+    map: map,
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 7,
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeWeight: 2.5
+    }
+  });
+}
 
 function placeOriginMarker(lat, lon) {
-  if (mOrigin) map.removeLayer(mOrigin);
-  mOrigin = L.marker([lat, lon], { icon: mkIcon('#3ecf5f') }).addTo(map);
+  if (mOrigin) mOrigin.setMap(null);
+  mOrigin = createMarker(lat, lon, '#3ecf5f');
 }
 function placeDestMarker(lat, lon) {
-  if (mDest) map.removeLayer(mDest);
-  mDest = L.marker([lat, lon], { icon: mkIcon('#f04e4e') }).addTo(map);
+  if (mDest) mDest.setMap(null);
+  mDest = createMarker(lat, lon, '#f04e4e');
 }
 function clearRouteLine() {
-  if (mRoute) { map.removeLayer(mRoute); mRoute = null; }
+  if (mRoute) { mRoute.setMap(null); mRoute = null; }
 }
 function drawRouteLine(coords) {
   clearRouteLine();
-  const ll = coords.map(c => [c[1], c[0]]);
-  mRoute = L.polyline(ll, { color: '#D4AF37', weight: 4, opacity: 0.88, smoothFactor: 1 }).addTo(map);
-  map.fitBounds(mRoute.getBounds(), { padding: [50, 50] });
+  const path = coords.map(c => ({ lat: c[0], lng: c[1] }));
+  mRoute = new google.maps.Polyline({
+    path: path,
+    strokeColor: '#D4AF37',
+    strokeWeight: 4,
+    strokeOpacity: 0.88,
+    map: map
+  });
+  const bounds = new google.maps.LatLngBounds();
+  path.forEach(p => bounds.extend(p));
+  map.fitBounds(bounds, 50);
 }
 function fitBothMarkers() {
-  if (origin && dest) map.fitBounds([[origin.lat, origin.lon],[dest.lat, dest.lon]], { padding: [60, 60] });
+  if (origin && dest) {
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: origin.lat, lng: origin.lon });
+    bounds.extend({ lat: dest.lat, lng: dest.lon });
+    map.fitBounds(bounds, 60);
+  }
 }
-
-// Map click → set points
-map.on('click', async e => {
-  const { lat, lng } = e.latlng;
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt-BR`);
-    const d = await r.json();
-    const name = fmtName(d);
-    if (!origin) {
-      origin = { name, lat, lon: lng };
-      document.getElementById('inp-origin').value = name;
-      placeOriginMarker(lat, lng);
-      toast('🟢 Origem definida');
-    } else if (!dest) {
-      dest = { name, lat, lon: lng };
-      document.getElementById('inp-dest').value = name;
-      placeDestMarker(lat, lng);
-      fitBothMarkers();
-      toast('🔴 Destino definido');
-    } else {
-      dest = { name, lat, lon: lng };
-      document.getElementById('inp-dest').value = name;
-      placeDestMarker(lat, lng);
-      fitBothMarkers();
-      toast('🔴 Destino atualizado');
-    }
-  } catch(err) { console.warn('Reverse geocode error', err); }
-});
 
 // ═══════════════════════════════════════════════
-//  NOMINATIM AUTOCOMPLETE
+//  GOOGLE PLACES AUTOCOMPLETE
 // ═══════════════════════════════════════════════
-const VIEWBOX = '-35.6,-8.7,-34.6,-7.7';
-const timers = {};
-
-function fmtName(item) {
-  const a = item.address || {};
-  const parts = [];
-  if (a.road || a.pedestrian || a.footway) parts.push(a.road || a.pedestrian || a.footway);
-  if (a.suburb || a.neighbourhood || a.quarter) parts.push(a.suburb || a.neighbourhood || a.quarter);
-  const city = a.city || a.town || a.village || a.municipality || '';
-  if (city) parts.push(city);
-  return parts.length ? parts.join(', ') : (item.display_name || '').split(',').slice(0, 3).join(',').trim();
-}
-
-async function geocode(q) {
-  if (q.length < 3) return [];
-  try {
-    const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
-      q, format: 'json', addressdetails: 1, limit: 6,
-      countrycodes: 'br', viewbox: VIEWBOX, bounded: 0
-    });
-    const r = await fetch(url, { headers: { 'Accept-Language': 'pt-BR,pt;q=0.9' } });
-    return await r.json();
-  } catch { return []; }
-}
-
-function setupAC(inpId, listId, onSelect) {
-  const inp  = document.getElementById(inpId);
-  const list = document.getElementById(listId);
-
-  inp.addEventListener('input', () => {
-    clearTimeout(timers[inpId]);
-    const q = inp.value.trim();
-    list.innerHTML = '';
-    if (q.length < 3) return;
-    timers[inpId] = setTimeout(async () => {
-      const results = await geocode(q);
-      list.innerHTML = '';
-      if (!results.length) {
-        list.innerHTML = '<div class="ac-item" style="color:#555;cursor:default">Sem resultados</div>';
-        return;
-      }
-      results.forEach(item => {
-        const name = fmtName(item);
-        const city = (item.address || {}).city || (item.address || {}).town || (item.address || {}).municipality || '';
-        const div  = document.createElement('div');
-        div.className = 'ac-item';
-        div.innerHTML  = name + (city ? `<small>${city}</small>` : '');
-        div.addEventListener('mousedown', e => {
-          e.preventDefault();
-          inp.value = name;
-          list.innerHTML = '';
-          onSelect({ name, lat: parseFloat(item.lat), lon: parseFloat(item.lon) });
-        });
-        list.appendChild(div);
-      });
-    }, AC_DEBOUNCE_MS);
+function setupGoogleAC(inputId, onSelect) {
+  const input = document.getElementById(inputId);
+  const ac = new google.maps.places.Autocomplete(input, {
+    componentRestrictions: { country: 'br' },
+    fields: ['formatted_address', 'geometry', 'name', 'address_components'],
+    types: ['geocode', 'establishment']
   });
-
-  inp.addEventListener('blur', () => setTimeout(() => { list.innerHTML = ''; }, AC_BLUR_DELAY_MS));
+  ac.addListener('place_changed', () => {
+    const place = ac.getPlace();
+    if (!place.geometry) return;
+    const lat = place.geometry.location.lat();
+    const lon = place.geometry.location.lng();
+    const name = place.name || place.formatted_address || input.value;
+    onSelect({ name, lat, lon });
+  });
+  return ac;
 }
 
-setupAC('inp-origin', 'ac-origin', p => {
-  origin = p;
-  placeOriginMarker(p.lat, p.lon);
-  fitBothMarkers();
-});
-setupAC('inp-dest', 'ac-dest', p => {
-  dest = p;
-  placeDestMarker(p.lat, p.lon);
-  fitBothMarkers();
-});
-
-// Clear buttons
-document.getElementById('clr-origin').addEventListener('click', () => {
-  document.getElementById('inp-origin').value = '';
-  origin = null;
-  if (mOrigin) { map.removeLayer(mOrigin); mOrigin = null; }
-  hideResult();
-});
-document.getElementById('clr-dest').addEventListener('click', () => {
-  document.getElementById('inp-dest').value = '';
-  dest = null;
-  if (mDest) { map.removeLayer(mDest); mDest = null; }
-  hideResult();
-});
-
 // ═══════════════════════════════════════════════
-//  OSRM ROUTING
+//  DIRECTIONS SERVICE (ROUTING)
 // ═══════════════════════════════════════════════
 async function fetchRoute(oLat, oLon, dLat, dLon) {
-  const url = `https://router.project-osrm.org/route/v1/driving/${oLon},${oLat};${dLon},${dLat}?overview=full&geometries=geojson`;
-  const r = await fetch(url);
-  const d = await r.json();
-  if (d.code !== 'Ok' || !d.routes?.length) throw new Error('Rota não encontrada');
-  const rt = d.routes[0];
-  return { km: rt.distance / 1000, min: rt.duration / 60, coords: rt.geometry.coordinates };
+  return new Promise((resolve, reject) => {
+    const ds = new google.maps.DirectionsService();
+    ds.route({
+      origin: { lat: oLat, lng: oLon },
+      destination: { lat: dLat, lng: dLon },
+      travelMode: 'DRIVING'
+    }, (result, status) => {
+      if (status !== 'OK') { reject(new Error('Rota não encontrada')); return; }
+      const leg = result.routes[0].legs[0];
+      const km = leg.distance.value / 1000;
+      const min = leg.duration.value / 60;
+      const coords = result.routes[0].overview_path.map(p => [p.lat(), p.lng()]);
+      resolve({ km, min, coords });
+    });
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -875,39 +840,257 @@ function fmtMin(m) {
 }
 
 // ═══════════════════════════════════════════════
-//  CALCULATE BUTTON
+//  INIT APP (after Google Maps loads)
 // ═══════════════════════════════════════════════
-const btnCalc = document.getElementById('btn-calc');
+async function initApp() {
+  // --- API Key ---
+  let apiKey = cfg.apiKey || '';
+  if (!apiKey) {
+    apiKey = (prompt('Insira sua chave da API do Google Maps:') || '').trim();
+    if (!apiKey) {
+      toast('⚠️ API Key é obrigatória para usar o mapa');
+      return;
+    }
+    cfg.apiKey = apiKey;
+    saveCfg(cfg);
+  }
+  document.getElementById('cfg-apikey').value = apiKey;
 
-btnCalc.addEventListener('click', async () => {
-  if (!origin) { toast('⚠️ Informe a origem'); return; }
-  if (!dest)   { toast('⚠️ Informe o destino'); return; }
-
-  btnCalc.disabled = true;
-  btnCalc.innerHTML = '<div class="spin"></div><span>CALCULANDO…</span>';
-
+  // --- Load Google Maps ---
   try {
-    route = await fetchRoute(origin.lat, origin.lon, dest.lat, dest.lon);
-    fare  = calcFare(route.km);
-    adjFare = null;
-    customMode = false;
-    document.getElementById('tog-custom').checked = false;
-    document.getElementById('adj-row').style.display = 'none';
-    document.getElementById('inp-adj').value = '';
-
-    drawRouteLine(route.coords);
-    renderResult();
-    document.getElementById('result-card').classList.add('show');
-    toast('✅ Rota calculada!');
+    await loadGoogleMaps(apiKey);
   } catch(err) {
-    toast('❌ Erro ao calcular rota');
+    toast('❌ Falha ao carregar Google Maps');
     console.error(err);
+    return;
   }
 
-  btnCalc.disabled = false;
-  btnCalc.innerHTML = '<span>⚡</span><span>CALCULAR CORRIDA</span>';
-});
+  // --- Init Map ---
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: -8.2836, lng: -35.0455 },
+    zoom: 12,
+    styles: DARK_STYLE,
+    disableDefaultUI: false,
+    zoomControl: true,
+    streetViewControl: false,
+    mapTypeControl: false,
+    fullscreenControl: false
+  });
 
+  // --- Map Click Handler ---
+  map.addListener('click', async (e) => {
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
+    try {
+      const geocoder = new google.maps.Geocoder();
+      const response = await geocoder.geocode({ location: { lat, lng } });
+      if (!response.results?.length) return;
+      const name = response.results[0].formatted_address || '';
+      if (!origin) {
+        origin = { name, lat, lon: lng };
+        document.getElementById('inp-origin').value = name;
+        placeOriginMarker(lat, lng);
+        toast('🟢 Origem definida');
+      } else if (!dest) {
+        dest = { name, lat, lon: lng };
+        document.getElementById('inp-dest').value = name;
+        placeDestMarker(lat, lng);
+        fitBothMarkers();
+        toast('🔴 Destino definido');
+      } else {
+        dest = { name, lat, lon: lng };
+        document.getElementById('inp-dest').value = name;
+        placeDestMarker(lat, lng);
+        fitBothMarkers();
+        toast('🔴 Destino atualizado');
+      }
+    } catch(err) { console.warn('Reverse geocode error', err); }
+  });
+
+  // --- Autocomplete ---
+  setupGoogleAC('inp-origin', p => {
+    origin = p;
+    placeOriginMarker(p.lat, p.lon);
+    fitBothMarkers();
+  });
+  setupGoogleAC('inp-dest', p => {
+    dest = p;
+    placeDestMarker(p.lat, p.lon);
+    fitBothMarkers();
+  });
+
+  // --- Clear Buttons ---
+  document.getElementById('clr-origin').addEventListener('click', () => {
+    document.getElementById('inp-origin').value = '';
+    origin = null;
+    if (mOrigin) { mOrigin.setMap(null); mOrigin = null; }
+    hideResult();
+  });
+  document.getElementById('clr-dest').addEventListener('click', () => {
+    document.getElementById('inp-dest').value = '';
+    dest = null;
+    if (mDest) { mDest.setMap(null); mDest = null; }
+    hideResult();
+  });
+
+  // --- Calculate Button ---
+  const btnCalc = document.getElementById('btn-calc');
+
+  btnCalc.addEventListener('click', async () => {
+    if (!origin) { toast('⚠️ Informe a origem'); return; }
+    if (!dest)   { toast('⚠️ Informe o destino'); return; }
+
+    btnCalc.disabled = true;
+    btnCalc.innerHTML = '<div class="spin"></div><span>CALCULANDO…</span>';
+
+    try {
+      route = await fetchRoute(origin.lat, origin.lon, dest.lat, dest.lon);
+      fare  = calcFare(route.km);
+      adjFare = null;
+      customMode = false;
+      document.getElementById('tog-custom').checked = false;
+      document.getElementById('adj-row').style.display = 'none';
+      document.getElementById('inp-adj').value = '';
+
+      drawRouteLine(route.coords);
+      renderResult();
+      document.getElementById('result-card').classList.add('show');
+      toast('✅ Rota calculada!');
+    } catch(err) {
+      toast('❌ Erro ao calcular rota');
+      console.error(err);
+    }
+
+    btnCalc.disabled = false;
+    btnCalc.innerHTML = '<span>⚡</span><span>CALCULAR CORRIDA</span>';
+  });
+
+  // --- Custom Toggle & Adjust ---
+  document.getElementById('tog-custom').addEventListener('change', function() {
+    customMode = this.checked;
+    const row = document.getElementById('adj-row');
+    if (customMode) {
+      row.style.display = 'flex';
+      document.getElementById('inp-adj').value = fare ? fare.toFixed(2) : '';
+      adjFare = fare;
+    } else {
+      row.style.display = 'none';
+      adjFare = null;
+    }
+    renderResult();
+  });
+
+  document.getElementById('inp-adj').addEventListener('input', function() {
+    const v = parseFloat(this.value);
+    adjFare = (!isNaN(v) && v >= 0) ? parseFloat(v.toFixed(2)) : null;
+    renderResult();
+  });
+
+  // --- Google Maps Route (open in browser) ---
+  document.getElementById('btn-gm').addEventListener('click', () => {
+    if (!origin || !dest) return;
+    const oLat = Number(origin.lat);
+    const oLon = Number(origin.lon);
+    const dLat = Number(dest.lat);
+    const dLon = Number(dest.lon);
+    if ([oLat, oLon, dLat, dLon].some(isNaN)) return;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${oLat},${oLon}&destination=${dLat},${dLon}&travelmode=driving`;
+    window.open(url, '_blank');
+  });
+
+  // --- WhatsApp ---
+  document.getElementById('btn-wa').addEventListener('click', () => {
+    if (!route) return;
+    const v = (customMode && adjFare !== null) ? adjFare : fare;
+    const txt =
+      `🚗 RF DRIVE\n` +
+      `Corrida: ${origin.name} → ${dest.name}\n` +
+      `Distância: ${fmtKm(route.km)}\n` +
+      `Tempo: ${fmtMin(route.min)}\n` +
+      `Valor: ${brl(v)}`;
+    window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
+  });
+
+  // --- Orçamento ---
+  document.getElementById('btn-qt').addEventListener('click', () => {
+    if (!route) return;
+    const v = (customMode && adjFare !== null) ? adjFare : fare;
+    const now = new Date();
+    const ds  = now.toLocaleDateString('pt-BR') + ' às ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const txt =
+      `🚗 RF DRIVE – Orçamento\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📍 Origem:  ${origin.name}\n` +
+      `🏁 Destino: ${dest.name}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📏 Distância:  ${fmtKm(route.km)}\n` +
+      `⏱️  Tempo est.: ${fmtMin(route.min)}\n` +
+      `💲 Por km:     R$${cfg.km.toFixed(2).replace('.', ',')}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `💰 VALOR TOTAL: ${brl(v)}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📅 ${ds}`;
+    document.getElementById('quote-body').textContent = txt;
+    document.getElementById('modal-bg').classList.add('open');
+  });
+
+  document.getElementById('modal-x').addEventListener('click', () => document.getElementById('modal-bg').classList.remove('open'));
+  document.getElementById('modal-bg').addEventListener('click', e => { if (e.target === document.getElementById('modal-bg')) document.getElementById('modal-bg').classList.remove('open'); });
+  document.getElementById('btn-copy').addEventListener('click', () => {
+    const txt = document.getElementById('quote-body').textContent;
+    const finish = () => {
+      toast('✅ Copiado!');
+      document.getElementById('modal-bg').classList.remove('open');
+    };
+    (navigator.clipboard?.writeText(txt) || Promise.reject()).then(finish).catch(() => {
+      const ta = Object.assign(document.createElement('textarea'), { value: txt });
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      finish();
+    });
+  });
+
+  // --- Save to History ---
+  document.getElementById('btn-sv').addEventListener('click', () => {
+    if (!route) return;
+    const v = (customMode && adjFare !== null) ? adjFare : fare;
+    const now = new Date();
+    const hist = loadHist();
+    hist.unshift({
+      origem: origin.name,
+      destino: dest.name,
+      km: route.km.toFixed(1),
+      valor: v.toFixed(2),
+      data: now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    });
+    if (hist.length > 30) hist.length = 30;
+    saveHist(hist);
+    renderHist();
+    toast('💾 Salvo no histórico!');
+  });
+
+  // --- Clear History ---
+  document.getElementById('btn-clr-hist').addEventListener('click', () => {
+    if (!confirm('Limpar todo o histórico?')) return;
+    saveHist([]); renderHist(); toast('🗑️ Histórico limpo');
+  });
+
+  // --- Settings ---
+  document.getElementById('btn-cfg-save').addEventListener('click', () => {
+    const apiKeyVal = document.getElementById('cfg-apikey').value.trim();
+    const km  = parseFloat(document.getElementById('cfg-km').value);
+    const min = parseFloat(document.getElementById('cfg-min').value);
+    if (isNaN(km) || km <= 0)   { toast('⚠️ Valor/km inválido'); return; }
+    if (isNaN(min) || min < 0)  { toast('⚠️ Mínimo inválido'); return; }
+    cfg = { km, min, apiKey: apiKeyVal || cfg.apiKey };
+    saveCfg(cfg);
+    if (route) { fare = calcFare(route.km); if (!customMode) renderResult(); }
+    toast('⚙️ Configurações salvas!');
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  RESULT DISPLAY
+// ═══════════════════════════════════════════════
 function hideResult() {
   document.getElementById('result-card').classList.remove('show');
   clearRouteLine();
@@ -935,119 +1118,6 @@ function renderResult() {
 }
 
 // ═══════════════════════════════════════════════
-//  CUSTOM TOGGLE & ADJUST
-// ═══════════════════════════════════════════════
-document.getElementById('tog-custom').addEventListener('change', function() {
-  customMode = this.checked;
-  const row = document.getElementById('adj-row');
-  if (customMode) {
-    row.style.display = 'flex';
-    document.getElementById('inp-adj').value = fare ? fare.toFixed(2) : '';
-    adjFare = fare;
-  } else {
-    row.style.display = 'none';
-    adjFare = null;
-  }
-  renderResult();
-});
-
-document.getElementById('inp-adj').addEventListener('input', function() {
-  const v = parseFloat(this.value);
-  adjFare = (!isNaN(v) && v >= 0) ? parseFloat(v.toFixed(2)) : null;
-  renderResult();
-});
-
-// ═══════════════════════════════════════════════
-//  GOOGLE MAPS ROUTE
-// ═══════════════════════════════════════════════
-document.getElementById('btn-gm').addEventListener('click', () => {
-  if (!origin || !dest) return;
-  const oLat = Number(origin.lat);
-  const oLon = Number(origin.lon);
-  const dLat = Number(dest.lat);
-  const dLon = Number(dest.lon);
-  if ([oLat, oLon, dLat, dLon].some(isNaN)) return;
-  const url = `https://www.google.com/maps/dir/?api=1&origin=${oLat},${oLon}&destination=${dLat},${dLon}&travelmode=driving`;
-  window.open(url, '_blank');
-});
-
-// ═══════════════════════════════════════════════
-//  WHATSAPP
-// ═══════════════════════════════════════════════
-document.getElementById('btn-wa').addEventListener('click', () => {
-  if (!route) return;
-  const v = (customMode && adjFare !== null) ? adjFare : fare;
-  const txt =
-    `🚗 RF DRIVE\n` +
-    `Corrida: ${origin.name} → ${dest.name}\n` +
-    `Distância: ${fmtKm(route.km)}\n` +
-    `Tempo: ${fmtMin(route.min)}\n` +
-    `Valor: ${brl(v)}`;
-  window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
-});
-
-// ═══════════════════════════════════════════════
-//  ORÇAMENTO
-// ═══════════════════════════════════════════════
-document.getElementById('btn-qt').addEventListener('click', () => {
-  if (!route) return;
-  const v = (customMode && adjFare !== null) ? adjFare : fare;
-  const now = new Date();
-  const ds  = now.toLocaleDateString('pt-BR') + ' às ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const txt =
-    `🚗 RF DRIVE – Orçamento\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `📍 Origem:  ${origin.name}\n` +
-    `🏁 Destino: ${dest.name}\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `📏 Distância:  ${fmtKm(route.km)}\n` +
-    `⏱️  Tempo est.: ${fmtMin(route.min)}\n` +
-    `💲 Por km:     R$${cfg.km.toFixed(2).replace('.', ',')}\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `💰 VALOR TOTAL: ${brl(v)}\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `📅 ${ds}`;
-  document.getElementById('quote-body').textContent = txt;
-  document.getElementById('modal-bg').classList.add('open');
-});
-
-document.getElementById('modal-x').addEventListener('click', () => document.getElementById('modal-bg').classList.remove('open'));
-document.getElementById('modal-bg').addEventListener('click', e => { if (e.target === document.getElementById('modal-bg')) document.getElementById('modal-bg').classList.remove('open'); });
-document.getElementById('btn-copy').addEventListener('click', () => {
-  const txt = document.getElementById('quote-body').textContent;
-  const finish = () => {
-    toast('✅ Copiado!');
-    document.getElementById('modal-bg').classList.remove('open');
-  };
-  (navigator.clipboard?.writeText(txt) || Promise.reject()).then(finish).catch(() => {
-    const ta = Object.assign(document.createElement('textarea'), { value: txt });
-    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
-    finish();
-  });
-});
-
-// ═══════════════════════════════════════════════
-//  SAVE TO HISTORY
-// ═══════════════════════════════════════════════
-document.getElementById('btn-sv').addEventListener('click', () => {
-  if (!route) return;
-  const v = (customMode && adjFare !== null) ? adjFare : fare;
-  const now = new Date();
-  const hist = loadHist();
-  hist.unshift({
-    origem: origin.name,
-    destino: dest.name,
-    km: route.km.toFixed(1),
-    valor: v.toFixed(2),
-    data: now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  });
-  if (hist.length > 30) hist.length = 30;
-  saveHist(hist);
-  renderHist();
-  toast('💾 Salvo no histórico!');
-});
-
-// ═══════════════════════════════════════════════
 //  RENDER HISTORY
 // ═══════════════════════════════════════════════
 function renderHist() {
@@ -1069,47 +1139,18 @@ function renderHist() {
   `).join('');
 }
 
-document.getElementById('btn-clr-hist').addEventListener('click', () => {
-  if (!confirm('Limpar todo o histórico?')) return;
-  saveHist([]); renderHist(); toast('🗑️ Histórico limpo');
-});
-
-// ═══════════════════════════════════════════════
-//  SETTINGS
-// ═══════════════════════════════════════════════
 function loadCfgUI() {
   document.getElementById('cfg-km').value  = cfg.km;
   document.getElementById('cfg-min').value = cfg.min;
-}
-
-document.getElementById('btn-cfg-save').addEventListener('click', () => {
-  const km  = parseFloat(document.getElementById('cfg-km').value);
-  const min = parseFloat(document.getElementById('cfg-min').value);
-  if (isNaN(km) || km <= 0)   { toast('⚠️ Valor/km inválido'); return; }
-  if (isNaN(min) || min < 0)  { toast('⚠️ Mínimo inválido'); return; }
-  cfg = { km, min };
-  saveCfg(cfg);
-  if (route) { fare = calcFare(route.km); if (!customMode) renderResult(); }
-  toast('⚙️ Configurações salvas!');
-});
-
-// ═══════════════════════════════════════════════
-//  TOAST
-// ═══════════════════════════════════════════════
-let _toastT;
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(_toastT);
-  _toastT = setTimeout(() => el.classList.remove('show'), 3000);
+  document.getElementById('cfg-apikey').value = cfg.apiKey || '';
 }
 
 // ═══════════════════════════════════════════════
-//  INIT
+//  BOOT
 // ═══════════════════════════════════════════════
 loadCfgUI();
 renderHist();
+initApp();
 </script>
 </body>
 </html>
