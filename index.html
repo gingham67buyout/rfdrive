@@ -332,6 +332,7 @@
     .btn-wa  { color: var(--green); border-color: rgba(62,207,95,0.3); }
     .btn-qt  { color: #7baad4; border-color: rgba(123,170,212,0.3); }
     .btn-sv  { color: var(--gold); border-color: rgba(212,175,55,0.3); }
+    .btn-gm  { color: #4285f4; border-color: rgba(66,133,244,0.3); }
 
     /* ── HISTORY ── */
     .hist-list { display: flex; flex-direction: column; gap: 7px; }
@@ -592,6 +593,9 @@
           </button>
           <button class="btn-act btn-sv" id="btn-sv">
             <span class="ico">💾</span>Salvar
+          </button>
+          <button class="btn-act btn-gm" id="btn-gm">
+            <span class="ico">🗺️</span>Rota Google
           </button>
         </div>
       </div>
@@ -951,6 +955,20 @@ document.getElementById('inp-adj').addEventListener('input', function() {
   const v = parseFloat(this.value);
   adjFare = (!isNaN(v) && v >= 0) ? parseFloat(v.toFixed(2)) : null;
   renderResult();
+});
+
+// ═══════════════════════════════════════════════
+//  GOOGLE MAPS ROUTE
+// ═══════════════════════════════════════════════
+document.getElementById('btn-gm').addEventListener('click', () => {
+  if (!origin || !dest) return;
+  const oLat = Number(origin.lat);
+  const oLon = Number(origin.lon);
+  const dLat = Number(dest.lat);
+  const dLon = Number(dest.lon);
+  if ([oLat, oLon, dLat, dLon].some(isNaN)) return;
+  const url = `https://www.google.com/maps/dir/?api=1&origin=${oLat},${oLon}&destination=${dLat},${dLon}&travelmode=driving`;
+  window.open(url, '_blank');
 });
 
 // ═══════════════════════════════════════════════

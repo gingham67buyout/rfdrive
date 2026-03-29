@@ -15,6 +15,7 @@ Aplicativo web para motoristas do grupo **RF DRIVE** calcularem corridas com bas
 - **Compartilhar no WhatsApp** com origem, destino, distância e valor
 - **Gerar orçamento** formatado (copiável para área de transferência)
 - **Histórico de corridas** salvo em `localStorage` (últimas 30)
+- **Rota no Google Maps** — abre a rota de origem a destino no Google Maps para navegação por voz
 
 ### Etapa 3 – Personalização
 - **Corrida personalizada**: toggle para ajuste manual do valor final
