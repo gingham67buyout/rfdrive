@@ -1,15 +1,15 @@
 # RF DRIVE – Calculadora de Corridas
 
-Aplicativo web para motoristas do grupo **RF DRIVE** calcularem corridas com base em rota real no mapa.
+Aplicativo web para motoristas do grupo **RF DRIVE** calcularem corridas com base em rota real no mapa, usando **Google Maps**.
 
 ## Funcionalidades
 
 ### Etapa 1 – Cálculo por KM com Rota Real
-- Campos de **Origem** e **Destino** com autocomplete via Nominatim (OpenStreetMap)
-- Mapa interativo (Leaflet + CartoDB Dark) com rota traçada em dourado
-- Distância real (km) e tempo estimado via OSRM
+- Campos de **Origem** e **Destino** com autocomplete via Google Places
+- Mapa interativo (Google Maps com tema escuro) com rota traçada em dourado
+- Distância real (km) e tempo estimado via Google Directions
 - Cálculo automático: `valor = max(R$10, km × R$2,10)`
-- Clique no mapa para definir pontos diretamente
+- Clique no mapa para definir pontos diretamente (geocodificação reversa via Google)
 
 ### Etapa 2 – Ferramentas para Motoristas
 - **Compartilhar no WhatsApp** com origem, destino, distância e valor
@@ -19,7 +19,7 @@ Aplicativo web para motoristas do grupo **RF DRIVE** calcularem corridas com bas
 
 ### Etapa 3 – Personalização
 - **Corrida personalizada**: toggle para ajuste manual do valor final
-- **Configurações editáveis**: valor por km e valor mínimo persistidos em `localStorage`
+- **Configurações editáveis**: valor por km, valor mínimo e API Key do Google Maps persistidos em `localStorage`
 - Exibe cálculo original e ajustado simultaneamente
 
 ## Design
@@ -28,12 +28,14 @@ Aplicativo web para motoristas do grupo **RF DRIVE** calcularem corridas com bas
 - Responsivo — prioridade mobile
 
 ## Tecnologias (sem instalação necessária)
-| Lib | Uso |
-|-----|-----|
-| [Leaflet.js](https://leafletjs.com/) | Mapa interativo |
-| [Nominatim](https://nominatim.openstreetmap.org/) | Autocomplete e geocodificação reversa |
-| [OSRM](https://project-osrm.org/) | Cálculo de rota real |
-| CartoDB Dark tiles | Tiles de mapa escuro |
+| Serviço | Uso |
+|---------|-----|
+| [Google Maps JavaScript API](https://developers.google.com/maps/documentation/javascript) | Mapa interativo com tema escuro |
+| [Google Places API](https://developers.google.com/maps/documentation/places/web-service) | Autocomplete de endereços |
+| [Google Directions API](https://developers.google.com/maps/documentation/directions) | Cálculo de rota real e tempo estimado |
+| [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | Geocodificação reversa (clique no mapa) |
 
 ## Como usar
-Abra `index.html` em qualquer navegador moderno. Sem build, sem servidor necessário.
+1. Obtenha uma [chave da API do Google Maps](https://console.cloud.google.com/apis/credentials) com as APIs: Maps JavaScript, Places, Directions e Geocoding habilitadas.
+2. Abra `index.html` em qualquer navegador moderno. Sem build, sem servidor necessário.
+3. Na primeira vez, o sistema pedirá a chave da API. Ela também pode ser configurada em **Configurações**.
