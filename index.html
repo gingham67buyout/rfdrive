@@ -704,7 +704,7 @@ function loadGoogleMaps(apiKey) {
   return new Promise((resolve, reject) => {
     if (window.google && window.google.maps) { resolve(); return; }
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry&language=pt-BR&region=BR`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&language=pt-BR&region=BR`;
     s.async = true;
     s.defer = true;
     s.onload = resolve;
@@ -848,8 +848,8 @@ async function initApp() {
   let apiKey = cfg.apiKey || '';
   if (!apiKey) {
     apiKey = (prompt('Insira sua chave da API do Google Maps.\nVocê também pode configurá-la em Configurações.') || '').trim();
-    if (!apiKey) {
-      toast('⚠️ Informe a API Key em Configurações');
+    if (!apiKey || !/^[A-Za-z0-9_-]{20,}$/.test(apiKey)) {
+      toast('⚠️ API Key inválida. Configure em Configurações.');
       return;
     }
     cfg.apiKey = apiKey;
@@ -1082,7 +1082,7 @@ async function initApp() {
     const min = parseFloat(document.getElementById('cfg-min').value);
     if (isNaN(km) || km <= 0)   { toast('⚠️ Valor/km inválido'); return; }
     if (isNaN(min) || min < 0)  { toast('⚠️ Mínimo inválido'); return; }
-    cfg = { km, min, apiKey: apiKeyVal || cfg.apiKey };
+    cfg = { km, min, apiKey: apiKeyVal };
     saveCfg(cfg);
     if (route) { fare = calcFare(route.km); if (!customMode) renderResult(); }
     toast('⚙️ Configurações salvas!');
